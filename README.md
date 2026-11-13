@@ -237,6 +237,87 @@ Adjust `--workers` in `build.sh` or the render command.
 
 ---
 
+## Training Library + Enhanced Pipeline
+
+### Visual Asset Catalog (`core/assets/catalog/`)
+
+286 reference images from the Vox/editorial training library are stored in `core/assets/catalog/images/` and NLP-labeled with Claude vision. At generation time, the director matches each scene description against the catalog to pull in real photo props.
+
+```sh
+# Build the catalog index (requires ANTHROPIC_API_KEY — only needed once)
+python core/assets/catalog/build_catalog.py
+
+# Output: core/assets/catalog/index.json — NLP-tagged entries for every image
+```
+
+The matcher ranks images by semantic overlap with the scene description, respects category and mood filters, and returns absolute paths ready for `drawProp()` to composite onto the Canvas.
+
+### Smart Scene Splitter (`pipeline/scene_splitter.py`)
+
+Any scene whose VO exceeds 8.5 seconds is automatically split at sentence boundaries. Each sub-scene gets a distinct visual continuation type so the frame keeps progressing while the audio plays:
+
+| Continuation type | What appears |
+|---|---|
+| `stat-pull` | Key number extracted from VO and slammed in big |
+| `annotation-appear` | Hand-drawn arrow + label popping onto the visual |
+| `highlight-word` | Red marker sweeping under the key phrase |
+| `sticky-note-pop` | Sticky note with 1–3 word summary pops in |
+| `counter-tick` | Number counts up reinforcing the narration |
+| `line-draw-diagram` | Simple arrow/line diagram draws itself |
+| `subtext-reveal` | Supporting context typewriters in |
+| `prop-enter` | Catalog prop asset slides in from side |
+| `comparison-split` | Screen splits to show before/after |
+| `quote-fragment` | Key phrase pulled out as large pull-quote |
+
+### Script Upgrader (`pipeline/script_upgrader.py`)
+
+Every raw topic or rough draft is automatically upgraded to Vox creator level before rendering:
+
+- **Structure enforced**: hook (3–5s surprising stat) → tension → data beat 1 → pivot → data beat 2 → payoff
+- **Iron rules**: max 10 words per sentence · no passive voice in first 15 words · specific numbers not generic adjectives · no "basically/essentially/kind of"
+- **Quality score**: 0–100 with specific issue flags before render
+- **Auto-fix**: splits sentences >20 words, assigns scene types from mood, estimates duration hints
+
+```sh
+# Preview script upgrade without rendering
+python pipeline/director.py --topic "Why Indian EV startups keep failing" --upgrade-only
+```
+
+### Boil Animation + Catalog Props (in `styles/vox-pro/template/main.js`)
+
+The render loop now includes:
+
+- **Boil offset**: 10fps seeded per-character jitter on headline text (from htlin222/vox-styled-reels analysis) — gives the organic "living paper" feel
+- **Catalog prop layer**: after each scene renders, matched catalog props are composited as torn-paper cutouts with drop shadow + entry animation
+- **Word-level karaoke**: red highlight under the active word as VO plays (requires word timing data from the script)
+
+### Visual Style DNA (`core/visual/style_dna.js`)
+
+7 Canvas 2D drawing recipes extracted from the training library:
+
+| Style | Topics | Look |
+|---|---|---|
+| `EDITORIAL_CREAM` | Finance, economics, education | Warm cream, rule lines, Swiss type |
+| `BOLD_TYPOGRAPHIC` | Business, startups, brands | Oversized headline, minimal BW photo accent |
+| `RETRO_GRID` | Technology, software | Grid paper, browser window card, badge stickers |
+| `DARK_COLLAGE` | Politics, investigations | Near-black, BW cutouts, bold color blocks |
+| `TEAL_EDITORIAL` | India, society, environment | Teal bg, cream cards, event poster hierarchy |
+| `INFOGRAPHIC_TEAL` | Data, research, science | Teal bg, mind-map cards, section boxes |
+| `PAPER_ILLUS` | Culture, history | Paper texture, ink sketch, hand-drawn style |
+
+The style is auto-selected from topic keywords (`finance` → EDITORIAL_CREAM, `politics` → DARK_COLLAGE, etc.).
+
+### Visual Composer (`core/visual/composer.js`)
+
+High-level scene prop renderer with:
+
+- `drawProp(ctx, img, opts)` — entry animations (slam/pop/slide), torn paper mask, drop shadow, grayscale, tint, border
+- `boilOffset(seedStr, frame)` — 10fps mulberry-seeded jitter for organic text feel
+- `propPosition(preset, W, H, propW, propH)` — 11 placement presets (center, bottom-anchor, hero-full, mid-right, etc.)
+- `renderPropAsset(ctx, propEntry, sceneT, W, H)` — high-level one-call prop renderer
+
+---
+
 ## Demo: Netflix Mood Reel
 
 `films/netflix-mood/` is a fully hand-crafted 55-second reel (no Claude needed) demonstrating the motion vocabulary:

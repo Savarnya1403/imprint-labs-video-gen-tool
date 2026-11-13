@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-OpusFlow Director — end-to-end film pipeline.
+Imprint Labs Video Gen Tool — Director
+End-to-end film pipeline with smart scene splitting, script upgrading,
+asset catalog matching, and style-DNA visual selection.
 
 Usage:
   python pipeline/director.py --topic "Spotify Wrapped" --style vox-pro --duration 45
@@ -8,14 +10,14 @@ Usage:
   python pipeline/director.py --topic "Why Indian roads kill 150,000 a year" --style vox-dark
 
 The director:
-  1. Researches the topic (Wikipedia + search)
-  2. Writes a data-backed script (Claude API)
-  3. Plans visual scenes
-  4. Fetches real images
-  5. Generates VO audio (edge-tts)
-  6. Measures timing
-  7. Generates film code (main.js, mix.py, build.sh)
-  8. Runs the render pipeline
+  1. Researches the topic (5-tier credible sources)
+  2. Upgrades/writes a Vox-creator-level script (hook→tension→data→pivot→payoff)
+  3. Splits any long scenes (>8s VO) into smart visual continuations
+  4. Matches catalog assets (props + styles) to each scene
+  5. Fetches real internet images
+  6. Generates VO audio (edge-tts, voice-first timing)
+  7. Generates film code (main.js, mix.py, build.sh) with style DNA
+  8. Optionally runs the render pipeline
 """
 
 import os, sys, json, math, asyncio, re, shutil, subprocess, argparse
@@ -25,10 +27,20 @@ from datetime import datetime
 HERE = Path(__file__).parent.parent  # opusflow root
 sys.path.insert(0, str(HERE))
 
-from pipeline.researcher  import research
-from pipeline.scripter    import write_script
+from pipeline.researcher     import research
+from pipeline.scripter       import write_script
+from pipeline.script_upgrader import upgrade_script, check_script_quality
+from pipeline.scene_splitter  import process_script_scenes, estimate_word_timings
 from core.assets.fetch_images   import ImageFetcher
 from core.assets.process_images import batch_process
+
+# lazy import — catalog may not be built yet
+def _get_matcher():
+    try:
+        from core.assets.catalog.matcher import find_props, find_styles, stats as cat_stats
+        return find_props, find_styles, cat_stats
+    except Exception:
+        return None, None, None
 
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -414,19 +426,62 @@ async def direct(topic: str, style: str = "vox-pro", duration: int = 45,
     print(f"{'='*60}\n")
 
     # ── 1. Research ───────────────────────────────────────────────────────────
-    print("▶ Step 1: Research")
+    print("▶ Step 1: Research (5-tier credible sources)")
     research_data = research(topic, depth="standard")
     with open(film_dir / "research.json", "w") as f:
         json.dump(research_data, f, indent=2)
     print(f"  ✓ {len(research_data.get('facts',[]))} facts, {len(research_data.get('numbers',[]))} stats\n")
 
-    # ── 2. Script ─────────────────────────────────────────────────────────────
-    print("▶ Step 2: Script")
-    script = write_script(topic, research_data, duration=duration, style=style)
+    # ── 2. Script — Vox creator-level upgrade ─────────────────────────────────
+    print("▶ Step 2: Script (hook→tension→data→pivot→payoff)")
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        try:
+            script = upgrade_script(topic, target_duration=duration,
+                                    style=style, research_data=research_data)
+        except Exception as e:
+            print(f"  ⚠ upgrade_script failed ({e}), falling back to write_script")
+            script = write_script(topic, research_data, duration=duration, style=style)
+    else:
+        print("  ⚠ No ANTHROPIC_API_KEY — using template script")
+        script = write_script(topic, research_data, duration=duration, style=style)
+
+    # quality check
+    quality = check_script_quality(script)
+    print(f"  Script quality: {quality['score']}/100")
+    for issue in quality.get("issues", [])[:3]:
+        print(f"    ⚠ {issue}")
+
     with open(film_dir / "script.json", "w") as f:
         json.dump(script, f, indent=2)
-    scenes = script.get("scenes", [])
-    print(f"  ✓ {len(scenes)} scenes, logline: {script.get('logline','')[:60]}\n")
+    raw_scenes = script.get("scenes", [])
+    print(f"  ✓ {len(raw_scenes)} raw scenes, logline: {script.get('logline','')[:60]}\n")
+
+    # ── 2b. Smart scene splitting ─────────────────────────────────────────────
+    print("▶ Step 2b: Smart scene splitting (max 8s per scene)")
+    scenes = process_script_scenes(raw_scenes)
+    if len(scenes) != len(raw_scenes):
+        print(f"  ✓ Split {len(raw_scenes)} → {len(scenes)} scenes (long VO auto-continued)")
+    else:
+        print(f"  ✓ All scenes within duration limit ({len(scenes)} scenes)")
+    script["scenes"] = scenes
+
+    # ── 2c. Catalog asset matching ────────────────────────────────────────────
+    find_props, find_styles, cat_stats = _get_matcher()
+    if find_props:
+        s = cat_stats()
+        print(f"▶ Step 2c: Catalog asset matching ({s['props']} props, {s['styles']} style refs)")
+        for scene in scenes:
+            desc = f"{scene.get('visual','')} {scene.get('vo','')} {topic}"
+            matched_props  = find_props(desc, n=2)
+            matched_styles = find_styles(scene.get('visual_type', '') + ' ' + topic, n=1)
+            if matched_props:
+                scene["catalog_props"] = [p["path"] for p in matched_props]
+                print(f"  {scene['id']}: prop → {matched_props[0].get('subject','?')[:40]}")
+            if matched_styles:
+                scene["catalog_style_ref"] = matched_styles[0]["file"]
+        print()
+    else:
+        print("▶ Step 2c: Catalog not built yet (run core/assets/catalog/build_catalog.py)\n")
 
     # ── 3. Voice ──────────────────────────────────────────────────────────────
     print("▶ Step 3: Voice (edge-tts)")
@@ -564,14 +619,33 @@ window.__TIMELINE__  = {json.dumps(timeline, indent=2)};
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="OpusFlow Director")
-    parser.add_argument("--topic",    required=True, help="Film topic")
+    parser = argparse.ArgumentParser(description="Imprint Labs Video Gen Tool — Director")
+    parser.add_argument("--topic",    required=True, help="Film topic or raw script")
     parser.add_argument("--style",    default="vox-pro", choices=STYLES)
-    parser.add_argument("--duration", type=int, default=45)
+    parser.add_argument("--duration", type=int, default=45, help="Target duration in seconds")
     parser.add_argument("--name",     default=None, help="Custom film slug")
-    parser.add_argument("--no-render", action="store_true")
-    parser.add_argument("--no-images", action="store_true")
+    parser.add_argument("--depth",    default="standard", choices=["quick","standard","deep"],
+                        help="Research depth")
+    parser.add_argument("--no-render",  action="store_true", help="Skip proof still render")
+    parser.add_argument("--no-images",  action="store_true", help="Skip image fetch")
+    parser.add_argument("--upgrade-only", action="store_true",
+                        help="Only run script upgrade and print — don't build film")
     args = parser.parse_args()
+
+    if args.upgrade_only:
+        # Quick script preview without building the film
+        import asyncio
+        script = upgrade_script(args.topic, target_duration=args.duration, style=args.style)
+        scenes_split = process_script_scenes(script.get("scenes", []))
+        quality = check_script_quality(script)
+        print(f"\nLogline: {script.get('logline','')}")
+        print(f"Quality: {quality['score']}/100  |  Scenes: {len(scenes_split)}\n")
+        for s in scenes_split:
+            dur = s.get("duration_hint", 0)
+            cont = " [CONTINUATION]" if s.get("is_continuation") else ""
+            print(f"  [{s['id']}] {dur:.1f}s {s.get('scene_type','')} {cont}")
+            print(f"         {s['vo'][:80]}...")
+        sys.exit(0)
 
     asyncio.run(direct(
         topic       = args.topic,
