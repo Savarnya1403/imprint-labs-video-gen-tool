@@ -1,0 +1,19 @@
+node_modules/
+__pycache__/
+*.pyc
+.env
+.env.*
+
+# rendered outputs (large binaries)
+films/*/out/video.mp4
+films/*/out/audio_raw.aac
+films/*/out/vo/*.mp3
+
+# keep timings and stills
+!films/*/out/timings.json
+
+# playwright cache
+.playwright/
+
+# OS
+.DS_Store

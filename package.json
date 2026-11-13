@@ -1,0 +1,16 @@
+{
+  "name": "opusflow",
+  "version": "1.0.0",
+  "description": "10x Vox-style cinematic reel engine — real images, AI scripts, data-driven infographics",
+  "type": "module",
+  "scripts": {
+    "setup": "sh setup.sh",
+    "render": "node core/render/video.mjs",
+    "still": "node core/render/still.mjs",
+    "mux": "sh core/render/mux.sh"
+  },
+  "dependencies": {
+    "playwright": "^1.44.0",
+    "playwright-core": "^1.65.0"
+  }
+}

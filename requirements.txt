@@ -1,0 +1,16 @@
+numpy>=1.26
+scipy>=1.12
+soundfile>=0.12
+Pillow>=10.3
+requests>=2.31
+edge-tts>=6.1
+anthropic>=0.28
+colorthief>=0.2
+reportlab>=4.2
+aiohttp>=3.9
+beautifulsoup4>=4.12
+lxml>=5.2
+tqdm>=4.66
+feedparser>=6.0           # RSS feed parsing
+youtube-transcript-api>=0.6  # YouTube auto-captions
+yt-dlp>=2024.1            # YouTube metadata fallback

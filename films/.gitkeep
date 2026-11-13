@@ -1,0 +1,2 @@
+# Films are generated here by the director.
+# Run: python pipeline/director.py --topic "your topic"
