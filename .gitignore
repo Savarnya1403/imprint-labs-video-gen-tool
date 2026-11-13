@@ -2,7 +2,9 @@ node_modules/
 __pycache__/
 *.pyc
 .env
-.env.*
+.env.local
+.env.*.local
+!.env.example
 
 # rendered outputs (large binaries)
 films/*/out/video.mp4

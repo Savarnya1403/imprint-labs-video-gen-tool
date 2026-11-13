@@ -1,34 +1,68 @@
 #!/bin/sh
-# OpusFlow setup: installs Node packages + Python venv
+# Imprint Labs Video Gen Tool — setup
+# Installs Node packages, Playwright Chromium, Python venv + pip deps
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
-echo "=== OpusFlow setup ==="
+echo "=== Imprint Labs Video Gen Tool — setup ==="
 
-# Node
-if ! command -v node >/dev/null; then echo "ERROR: Node 20+ required"; exit 1; fi
-if ! command -v ffmpeg >/dev/null; then echo "ERROR: ffmpeg 7+ required (brew install ffmpeg)"; exit 1; fi
+# ── system deps check ─────────────────────────────────────────────────────
+if ! command -v node >/dev/null; then
+  echo "ERROR: Node.js 18+ is required."
+  echo "       Install: https://nodejs.org  or  brew install node"
+  exit 1
+fi
+if ! command -v ffmpeg >/dev/null; then
+  echo "ERROR: ffmpeg is required."
+  echo "       Install: brew install ffmpeg  (macOS)  or  apt install ffmpeg  (Linux)"
+  exit 1
+fi
+NODE_MAJOR=$(node -e "process.stdout.write(process.versions.node.split('.')[0])")
+if [ "$NODE_MAJOR" -lt 18 ]; then
+  echo "ERROR: Node.js 18+ required (found $NODE_MAJOR). Please upgrade."
+  exit 1
+fi
+
+# ── Node packages + Playwright Chromium ───────────────────────────────────
 echo "→ npm install..."
 cd "$HERE" && npm install --silent
-npx playwright install chromium 2>/dev/null || true
 
-# Python venv
+echo "→ installing Playwright Chromium headless shell..."
+node node_modules/.bin/playwright install chromium-headless-shell 2>/dev/null || \
+node node_modules/.bin/playwright install chromium 2>/dev/null || true
+
+# ── Python venv ───────────────────────────────────────────────────────────
 PY=${PYTHON:-python3}
+if ! $PY -c "import sys; assert sys.version_info >= (3,10)" 2>/dev/null; then
+  echo "ERROR: Python 3.10+ required."
+  exit 1
+fi
 if [ ! -d "$HERE/.venv" ]; then
-  echo "→ creating Python venv..."
+  echo "→ creating Python venv (.venv)..."
   $PY -m venv "$HERE/.venv"
 fi
 echo "→ pip install..."
+"$HERE/.venv/bin/pip" install -q --upgrade pip
 "$HERE/.venv/bin/pip" install -q -r "$HERE/requirements.txt"
 
+# ── .env ──────────────────────────────────────────────────────────────────
+if [ ! -f "$HERE/.env" ]; then
+  cp "$HERE/.env.example" "$HERE/.env"
+  echo "→ created .env from .env.example — add your API keys"
+fi
+
 echo ""
-echo "=== Done! ==="
+echo "=== Setup complete ==="
 echo ""
-echo "API keys needed (add to .env or export):"
-echo "  ANTHROPIC_API_KEY   — script writing (required)"
-echo "  PEXELS_API_KEY      — Pexels photo search (free at pexels.com/api/)"
-echo "  UNSPLASH_ACCESS_KEY — Unsplash photo search (free at unsplash.com/developers)"
+echo "Activate venv:     source .venv/bin/activate"
 echo ""
-echo "Usage:"
+echo "Add API keys to:   .env"
+echo "  ANTHROPIC_API_KEY       — required for AI script writing"
+echo "  PEXELS_API_KEY          — recommended for photo search"
+echo "  UNSPLASH_ACCESS_KEY     — optional second photo source"
+echo ""
+echo "Make a film:"
 echo "  python pipeline/director.py --topic 'your topic' --style vox-pro"
 echo ""
-echo "Library: $HERE"
+echo "Run the included demo (no API key needed):"
+echo "  node core/render/video.mjs films/netflix-mood --fps 30 --size 1080x1920 --workers 4"
+echo ""
